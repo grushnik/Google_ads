@@ -88,7 +88,7 @@
       </div>
     </div>
     <div class="controls">
-      <input type="file" id="file" accept=".csv" />
+      <input type="file" id="file" accept=".csv" multiple />
       <input type="number" id="dailyLimit" placeholder="Daily budget limit (e.g., 50)" step="0.01" />
       <select id="currency">
         <option value="USD" selected>USD</option>
@@ -144,17 +144,15 @@
     </section>
 
     <section class="panel" style="margin-top:16px;">
-      <h2>What columns does the CSV need?</h2>
+      <h2>Supported Google Ads CSVs</h2>
       <div class="note">
-        This dashboard tries to auto-detect column names. Best results if your file includes:
+        Drop in one or more of these standard exports. The app will auto-detect and use what it can; unknown formats are ignored.
         <ul>
-          <li><b>Date</b> (e.g., <i>2025-08-29</i> or <i>8/29/2025</i>)</li>
-          <li><b>Clicks</b>, <b>Impressions</b></li>
-          <li><b>Cost</b> (will auto-convert from micros if values look huge)</li>
-          <li><b>Keyword</b> (for spend-by-keyword)</li>
-          <li><b>Country</b> or <b>Country/Territory</b> or <b>Geo (region)</b> (for the map)</li>
+          <li><b>Locations (Geographic Report)</b> — for the world map (Country, Clicks, Impressions, Cost).</li>
+          <li><b>Search keywords</b> — for Spend by Keyword (Keyword, Clicks, Impressions, Cost).</li>
+          <li><b>Day</b> or <b>Day & Hour</b> — for Clicks/Impressions by date and Day-of-Week stats.</li>
         </ul>
-        If your export lacks “Country”, map will aggregate by whatever location column is present.
+        Tip: You can select multiple CSV files at once.
       </div>
     </section>
   </main>
@@ -344,32 +342,96 @@
         { displayModeBar:false, responsive:true });
 
       // Day of week chart
-      const dowNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-      const clicksDow = new Array(7).fill(0);
-      for(const r of rows){ const d = new Date(r.date+"T00:00:00"); const i = d.getDay(); clicksDow[i] += r.clicks; }
-      Plotly.newPlot('dowBar', [ { type:'bar', x: dowNames, y: clicksDow, name:'Clicks' } ],
-        { paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', margin:{l:40,r:10,t:10,b:40}, yaxis:{title:'Clicks'} },
-        { displayModeBar:false, responsive:true });
+const dowNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const indexByName = { 'Sunday':0,'Sun':0,'Monday':1,'Mon':1,'Tuesday':2,'Tue':2,'Wednesday':3,'Wed':3,'Thursday':4,'Thu':4,'Friday':5,'Fri':5,'Saturday':6,'Sat':6 };
+const clicksDow = new Array(7).fill(0);
+for(const r of rows){
+  if(r.date){
+    const d = new Date(r.date+"T00:00:00");
+    const i = d.getDay();
+    clicksDow[i] += r.clicks||0;
+  } else if(r.__dow){
+    const i = indexByName[r.__dow] ?? indexByName[String(r.__dow).slice(0,3)] ?? null;
+    if(i!=null) clicksDow[i] += r.clicks||0;
+  }
+}
+Plotly.newPlot('dowBar', [ { type:'bar', x: dowNames, y: clicksDow, name:'Clicks' } ],
+  { paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', margin:{l:40,r:10,t:10,b:40}, yaxis:{title:'Clicks'} },
+  { displayModeBar:false, responsive:true });
     }
 
     $('#file').addEventListener('change', (e)=>{
-      const f = e.target.files?.[0];
-      if(!f) return;
-      Papa.parse(f, {
-        header: true,
-        skipEmptyLines: true,
-        complete: function(res){
-          const raw = res.data;
-          rows = normalizeRows(raw);
-          $('#rowsInfo').textContent = `${fmtNum(rows.length)} rows loaded`;
-          redraw();
-        },
-        error: function(err){
-          alert('CSV parse error: '+err);
+  const files = Array.from(e.target.files || []);
+  if(!files.length) return;
+  let allRows = [];
+  let parsedCount = 0;
+
+  const done = ()=>{
+    rows = allRows;
+    document.getElementById('rowsInfo').textContent = `${fmtNum(rows.length)} rows loaded from ${files.length} file(s)`;
+    redraw();
+  };
+
+  function detectAndMap(records, filename){
+    if(!records || !records.length) return [];
+    const cols0 = records[0] || {};
+    const hasDate = !!pick(cols0,['Date']);
+    const hasClicks = !!pick(cols0,['Clicks']);
+    const hasImpr = !!pick(cols0,['Impressions','Impr.']);
+    const hasCost = !!pick(cols0,['Cost','Cost (micros)','Cost (USD)','Cost (Micros)']);
+    const hasKw = !!pick(cols0,['Keyword','Search keyword','Keyword text']);
+    const hasCountry = !!pick(cols0,['Country','Country/Territory','Geo (region)','Customer country/region','Location']);
+
+    // If it looks like a standard export with any of the key columns, use normalizeRows
+    if(hasDate || hasClicks || hasImpr || hasCost || hasKw || hasCountry){
+      return normalizeRows(records);
+    }
+
+    // Handle Day-of-Week-only tables (e.g., columns: Day, Impressions [, Clicks, Cost])
+    const dayKey = pick(cols0,['Day']);
+    if(dayKey && hasImpr){
+      const imprKey = pick(cols0,['Impressions','Impr.']);
+      const clicksKey = pick(cols0,['Clicks']);
+      const costKey = pick(cols0,['Cost']);
+      return records.map(r=>({
+        date: null, // no calendar date available
+        clicks: Number(clicksKey ? r[clicksKey] : 0) || 0,
+        impressions: Number(r[imprKey]||0) || 0,
+        cost: Number(costKey ? r[costKey] : 0) || 0,
+        keyword: '',
+        country: '',
+        __dow: String(r[dayKey]||'')
+      }));
+    }
+
+    // Unknown layout → ignore
+    return [];
+  }
+
+  files.forEach(f=>{
+    Papa.parse(f, {
+      header: true,
+      skipEmptyLines: true,
+      complete: function(res){
+        try{
+          const mapped = detectAndMap(res.data, f.name);
+          allRows = allRows.concat(mapped);
+        }catch(_){}
+        finally{
+          parsedCount++;
+          if(parsedCount===files.length) done();
         }
-      });
+      },
+      error: function(_err){
+        parsedCount++;
+        if(parsedCount===files.length) done();
+      }
+    });
+  });
+});
     });
   </script>
 </body>
 </html>
+
 
