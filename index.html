@@ -268,7 +268,7 @@
           keyword: (r[kwKey]??'').toString(),
           country: (r[countryKey]??'Unknown').toString()
         };
-      }).filter(r=>r.date);
+      });
     }
 
     function redraw(){
@@ -329,7 +329,7 @@
 
       // Lines by Date
       const byDate = groupBy(rows, r=>r.date);
-      const dates = [...byDate.keys()].sort();
+      const dates = [...byDate.keys()].filter(Boolean).sort();
       const clicksByD = dates.map(d=> sum(byDate.get(d), x=>x.clicks));
       const imprByD = dates.map(d=> sum(byDate.get(d), x=>x.impressions));
 
@@ -429,9 +429,9 @@ Plotly.newPlot('dowBar', [ { type:'bar', x: dowNames, y: clicksDow, name:'Clicks
     });
   });
 });
-    });
-  </script>
+</script>
 </body>
 </html>
+
 
 
