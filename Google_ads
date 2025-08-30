@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Google Ads – One‑Page Dashboard</title>
+  <!-- Plotly for charts/maps -->
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <!-- PapaParse for CSV parsing -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:#0b0c10;           /* deep charcoal */
+      --card:#13151a;         /* card dark */
+      --ink:#e8edf2;          /* text */
+      --muted:#98a2b3;        /* muted text */
+      --accent:#7c5cff;       /* purple accent */
+      --grid:#232730;         /* subtle borders */
+      --ok:#16a34a;           /* green */
+      --warn:#f59e0b;         /* amber */
+      --bad:#ef4444;          /* red */
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin:0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+      color:var(--ink); background:linear-gradient(180deg, #0b0c10 0%, #0e1016 100%);
+    }
+    header {
+      padding: 20px clamp(16px, 4vw, 32px);
+      border-bottom:1px solid var(--grid);
+      display:flex; gap:16px; align-items:center; flex-wrap:wrap; justify-content:space-between;
+    }
+    .title {
+      display:flex; align-items:center; gap:12px;
+    }
+    .logo {
+      width:38px; height:38px; border-radius:10px; background: radial-gradient(600px circle at 0 0, rgba(124,92,255,0.25), transparent 50%),
+                  linear-gradient(135deg, #7c5cff 0%, #00d4ff 100%);
+      box-shadow: 0 8px 26px rgba(124,92,255,.35), inset 0 1px 2px rgba(255,255,255,.25);
+    }
+    h1 { font-size: clamp(18px, 2vw, 22px); margin:0; letter-spacing:.2px; }
+    .controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+    input[type="file"], input[type="number"], select {
+      background:var(--card); color:var(--ink); border:1px solid var(--grid); border-radius:12px; padding:10px 12px;
+    }
+    .pill { padding:8px 12px; border:1px solid var(--grid); border-radius:999px; font-size:13px; color:var(--muted); }
+    main { padding: 20px clamp(16px, 4vw, 32px); }
+
+    /* KPI cards */
+    .kpis { display:grid; grid-template-columns: repeat(4, minmax(200px,1fr)); gap:14px; }
+    .card { background:var(--card); border:1px solid var(--grid); border-radius:18px; padding:16px; box-shadow: 0 10px 20px rgba(0,0,0,.25);
+      position:relative; overflow:hidden; }
+    .card h3 { margin:0; font-size:13px; color:var(--muted); font-weight:500; }
+    .card .value { margin-top:6px; font-size:26px; font-weight:700; letter-spacing:.3px; }
+    .spark { position:absolute; right:-20px; top:-20px; width:120px; height:120px; filter: blur(28px); opacity:.35; background: radial-gradient(closest-side, var(--accent), transparent 70%); }
+
+    /* Layout */
+    .grid { display:grid; grid-template-columns: 2.1fr 1fr; gap:16px; margin-top:16px; }
+    .panel { background:var(--card); border:1px solid var(--grid); border-radius:18px; padding:16px; }
+    .panel h2 { margin:0 0 12px; font-size:16px; font-weight:600; letter-spacing:.2px; }
+    .charts { display:grid; grid-template-columns: 1fr; gap:16px; }
+
+    /* Tables */
+    table { width:100%; border-collapse: collapse; }
+    th, td { padding:10px 12px; border-bottom:1px solid var(--grid); font-size:14px; }
+    th { text-align:left; color:var(--muted); font-weight:600; }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+
+    /* Footer note */
+    .note { color:var(--muted); font-size:13px; margin-top:6px; }
+
+    @media (max-width: 1000px){
+      .kpis { grid-template-columns: repeat(2, 1fr); }
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title">
+      <div class="logo" aria-hidden="true"></div>
+      <div>
+        <h1>Google Ads – One‑Page Dashboard</h1>
+        <div class="note">Upload a CSV export from Google Ads. Everything renders on this page – no install.</div>
+      </div>
+    </div>
+    <div class="controls">
+      <input type="file" id="file" accept=".csv" />
+      <input type="number" id="dailyLimit" placeholder="Daily budget limit (e.g., 50)" step="0.01" />
+      <select id="currency">
+        <option value="USD" selected>USD</option>
+        <option value="EUR">EUR</option>
+        <option value="GBP">GBP</option>
+      </select>
+      <span class="pill" id="rowsInfo">No file loaded</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- KPIs -->
+    <section class="kpis">
+      <div class="card"><div class="spark"></div><h3>Total Spend</h3><div class="value" id="kpiSpend">—</div></div>
+      <div class="card"><div class="spark"></div><h3>Daily Limit</h3><div class="value" id="kpiLimit">—</div></div>
+      <div class="card"><div class="spark"></div><h3>Total Clicks</h3><div class="value" id="kpiClicks">—</div></div>
+      <div class="card"><div class="spark"></div><h3>Conversion (Clicks / Impressions)</h3><div class="value" id="kpiCR">—</div></div>
+    </section>
+
+    <div class="grid">
+      <section class="panel">
+        <h2>World Map – Clicks & Impressions</h2>
+        <div id="map" style="width:100%;height:520px;"></div>
+        <div class="note">Tip: Hover to see country totals. Toggle traces in legend.</div>
+      </section>
+
+      <section class="panel">
+        <h2>Spend by Keyword (Top 25)</h2>
+        <div id="kwBar" style="width:100%;height:520px;"></div>
+        <details class="note" style="margin-top:8px;">
+          <summary>Show table</summary>
+          <div style="max-height:260px; overflow:auto; margin-top:8px;">
+            <table id="kwTable"><thead><tr><th>Keyword</th><th>Spend</th><th>Clicks</th><th>Impr.</th></tr></thead><tbody></tbody></table>
+          </div>
+        </details>
+      </section>
+    </div>
+
+    <section class="grid" style="margin-top:16px; grid-template-columns: 1fr 1fr;">
+      <div class="panel">
+        <h2>Clicks by Date</h2>
+        <div id="clicksLine" style="width:100%;height:380px;"></div>
+      </div>
+      <div class="panel">
+        <h2>Impressions by Date</h2>
+        <div id="imprLine" style="width:100%;height:380px;"></div>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top:16px;">
+      <h2>Clicks by Day of Week</h2>
+      <div id="dowBar" style="width:100%;height:380px;"></div>
+    </section>
+
+    <section class="panel" style="margin-top:16px;">
+      <h2>What columns does the CSV need?</h2>
+      <div class="note">
+        This dashboard tries to auto-detect column names. Best results if your file includes:
+        <ul>
+          <li><b>Date</b> (e.g., <i>2025-08-29</i> or <i>8/29/2025</i>)</li>
+          <li><b>Clicks</b>, <b>Impressions</b></li>
+          <li><b>Cost</b> (will auto-convert from micros if values look huge)</li>
+          <li><b>Keyword</b> (for spend-by-keyword)</li>
+          <li><b>Country</b> or <b>Country/Territory</b> or <b>Geo (region)</b> (for the map)</li>
+        </ul>
+        If your export lacks “Country”, map will aggregate by whatever location column is present.
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const $ = sel => document.querySelector(sel);
+
+    // Attempt to resolve common Google Ads column variants
+    function pick(obj, candidates){
+      for(const c of candidates){ if(c in obj) return c; }
+      // try case-insensitive match
+      const keys = Object.keys(obj);
+      for(const c of candidates){
+        const found = keys.find(k => k.toLowerCase() === c.toLowerCase());
+        if(found) return found;
+      }
+      // try contains
+      for(const c of candidates){
+        const found = keys.find(k => k.toLowerCase().includes(c.toLowerCase()));
+        if(found) return found;
+      }
+      return null;
+    }
+
+    function parseMoneyMaybeMicros(v){
+      const num = Number(String(v).replace(/[^0-9.\-]/g, ''));
+      if(!isFinite(num)) return 0;
+      // Heuristic: if median cost > 100000, assume micros and convert
+      return num;
+    }
+
+    function fmtCurrency(n, cur){
+      try { return new Intl.NumberFormat(undefined, { style:'currency', currency: cur }).format(n); }
+      catch { return `${cur} ${n.toFixed(2)}`; }
+    }
+
+    function fmtNum(n){ return new Intl.NumberFormat().format(n); }
+
+    function toISODate(d){
+      // Accepts either YYYY-MM-DD, MM/DD/YYYY, DD/MM/YYYY (best effort)
+      if(!d) return null;
+      if(/\d{4}-\d{2}-\d{2}/.test(d)) return d;
+      const parts = String(d).split(/[\/.\-]/).map(x=>x.trim());
+      if(parts.length===3){
+        let [a,b,c] = parts;
+        if(c.length===4){ // MM/DD/YYYY or DD/MM/YYYY
+          const mm = Number(a), dd = Number(b), yyyy = Number(c);
+          // naive: if first part > 12, treat as DD/MM/YYYY
+          const M = mm>12 ? dd : mm;
+          const D = mm>12 ? mm : dd;
+          return `${yyyy}-${String(M).padStart(2,'0')}-${String(D).padStart(2,'0')}`;
+        }
+      }
+      const dt = new Date(d);
+      if(!isNaN(dt)) return dt.toISOString().slice(0,10);
+      return null;
+    }
+
+    function groupBy(arr, keyFn){
+      const m = new Map();
+      for(const r of arr){
+        const k = keyFn(r);
+        if(!m.has(k)) m.set(k, []);
+        m.get(k).push(r);
+      }
+      return m;
+    }
+
+    function sum(arr, fn){ let s=0; for(const x of arr) s += fn(x)||0; return s; }
+
+    function median(nums){
+      const a = nums.filter(n=>isFinite(n)).sort((x,y)=>x-y);
+      if(a.length===0) return 0; const m = Math.floor(a.length/2);
+      return a.length%2? a[m] : (a[m-1]+a[m])/2;
+    }
+
+    let currency = 'USD';
+    $('#currency').addEventListener('change', e=>{ currency = e.target.value; redraw(); });
+    $('#dailyLimit').addEventListener('input', ()=> redraw());
+
+    let rows = [], cols = {};
+
+    function autoDetectMicros(costs){
+      const med = median(costs);
+      return med > 100000; // micros heuristic
+    }
+
+    function normalizeRows(rawRows){
+      if(!rawRows.length) return [];
+      cols = Object.fromEntries(Object.keys(rawRows[0]).map(k=>[k,k]));
+      // Normalize keys to keep exact header names
+      const dateKey = pick(rawRows[0], ['Date']);
+      const clicksKey = pick(rawRows[0], ['Clicks']);
+      const imprKey = pick(rawRows[0], ['Impressions','Impr.']);
+      const costKey = pick(rawRows[0], ['Cost','Cost (micros)','Cost (USD)','Cost (Micros)']);
+      const kwKey = pick(rawRows[0], ['Keyword','Search keyword','Keyword text']);
+      const countryKey = pick(rawRows[0], ['Country','Country/Territory','Geo (region)','Customer country/region','Location']);
+
+      const costsRaw = rawRows.map(r => Number(String(r[costKey] ?? 0).replace(/[^0-9.\-]/g,'')) || 0);
+      const isMicros = autoDetectMicros(costsRaw);
+
+      return rawRows.map(r=>{
+        const dateISO = toISODate(r[dateKey]);
+        const clicks = Number(r[clicksKey]||0);
+        const impr = Number(r[imprKey]||0);
+        let cost = parseMoneyMaybeMicros(r[costKey]);
+        if(isMicros) cost = cost/1e6;
+        return {
+          date: dateISO,
+          clicks,
+          impressions: impr,
+          cost,
+          keyword: (r[kwKey]??'').toString(),
+          country: (r[countryKey]??'Unknown').toString()
+        };
+      }).filter(r=>r.date);
+    }
+
+    function redraw(){
+      if(!rows.length){ return; }
+      const limit = Number($('#dailyLimit').value||0);
+
+      // KPIs
+      const totalSpend = sum(rows, r=>r.cost);
+      const totalClicks = sum(rows, r=>r.clicks);
+      const totalImpr = sum(rows, r=>r.impressions);
+      const cr = totalImpr>0 ? (totalClicks/totalImpr) : 0;
+      $('#kpiSpend').textContent = fmtCurrency(totalSpend, currency);
+      $('#kpiLimit').textContent = limit>0 ? fmtCurrency(limit, currency) : '—';
+      $('#kpiClicks').textContent = fmtNum(totalClicks);
+      $('#kpiCR').textContent = `${(cr*100).toFixed(2)}%`;
+
+      // World Map
+      const byCountry = groupBy(rows, r=>r.country || 'Unknown');
+      const countries = [...byCountry.keys()];
+      const clicksByC = countries.map(c=> sum(byCountry.get(c), x=>x.clicks) );
+      const imprByC = countries.map(c=> sum(byCountry.get(c), x=>x.impressions) );
+
+      const mapData = [
+        { type:'choropleth', locationmode:'country names', locations:countries, z: clicksByC, name:'Clicks', colorbar:{title:'Clicks'}, showscale:true, hovertemplate:'%{location}<br>Clicks: %{z}<extra></extra>' },
+        { type:'choropleth', locationmode:'country names', locations:countries, z: imprByC, name:'Impressions', visible:'legendonly', colorbar:{title:'Impr.'}, hovertemplate:'%{location}<br>Impr.: %{z}<extra></extra>' }
+      ];
+      Plotly.newPlot('map', mapData, {
+        paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)',
+        geo:{ projection:{type:'natural earth'}, bgcolor:'rgba(0,0,0,0)' },
+        legend:{orientation:'h', x:0, y:1.02}, margin:{l:0,r:0,t:0,b:0}
+      }, {displayModeBar:false, responsive:true});
+
+      // Spend by Keyword
+      const byKw = groupBy(rows.filter(r=>r.keyword), r=>r.keyword);
+      const kwItems = [...byKw.entries()].map(([k,arr])=>({
+        keyword:k,
+        spend: sum(arr,a=>a.cost),
+        clicks: sum(arr,a=>a.clicks),
+        impr: sum(arr,a=>a.impressions)
+      }));
+      kwItems.sort((a,b)=>b.spend-a.spend);
+      const top = kwItems.slice(0,25);
+      Plotly.newPlot('kwBar', [
+        { type:'bar', x: top.map(x=>x.keyword), y: top.map(x=>x.spend), name:'Spend', hovertemplate:'%{x}<br>'+currency+' %{y:.2f}<extra></extra>' }
+      ], {
+        paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', margin:{l:40,r:10,t:10,b:80},
+        xaxis:{ tickangle:-35, automargin:true }, yaxis:{ title:`Spend (${currency})` }
+      }, {displayModeBar:false, responsive:true});
+
+      // KW table
+      const tbody = document.querySelector('#kwTable tbody');
+      tbody.innerHTML = '';
+      kwItems.slice(0,200).forEach(row=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${row.keyword}</td><td>${fmtCurrency(row.spend, currency)}</td><td>${fmtNum(row.clicks)}</td><td>${fmtNum(row.impr)}</td>`;
+        tbody.appendChild(tr);
+      });
+
+      // Lines by Date
+      const byDate = groupBy(rows, r=>r.date);
+      const dates = [...byDate.keys()].sort();
+      const clicksByD = dates.map(d=> sum(byDate.get(d), x=>x.clicks));
+      const imprByD = dates.map(d=> sum(byDate.get(d), x=>x.impressions));
+
+      Plotly.newPlot('clicksLine', [ { x:dates, y:clicksByD, type:'scatter', mode:'lines+markers', name:'Clicks' } ],
+        { paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', margin:{l:40,r:10,t:10,b:40}, yaxis:{title:'Clicks'} },
+        { displayModeBar:false, responsive:true });
+
+      Plotly.newPlot('imprLine', [ { x:dates, y:imprByD, type:'scatter', mode:'lines+markers', name:'Impressions' } ],
+        { paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', margin:{l:40,r:10,t:10,b:40}, yaxis:{title:'Impressions'} },
+        { displayModeBar:false, responsive:true });
+
+      // Day of week chart
+      const dowNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+      const clicksDow = new Array(7).fill(0);
+      for(const r of rows){ const d = new Date(r.date+"T00:00:00"); const i = d.getDay(); clicksDow[i] += r.clicks; }
+      Plotly.newPlot('dowBar', [ { type:'bar', x: dowNames, y: clicksDow, name:'Clicks' } ],
+        { paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', margin:{l:40,r:10,t:10,b:40}, yaxis:{title:'Clicks'} },
+        { displayModeBar:false, responsive:true });
+    }
+
+    $('#file').addEventListener('change', (e)=>{
+      const f = e.target.files?.[0];
+      if(!f) return;
+      Papa.parse(f, {
+        header: true,
+        skipEmptyLines: true,
+        complete: function(res){
+          const raw = res.data;
+          rows = normalizeRows(raw);
+          $('#rowsInfo').textContent = `${fmtNum(rows.length)} rows loaded`;
+          redraw();
+        },
+        error: function(err){
+          alert('CSV parse error: '+err);
+        }
+      });
+    });
+  </script>
+</body>
+</html>
